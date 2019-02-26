@@ -1,0 +1,9 @@
+[package]
+name = "pdfplot"
+version = "0.1.0"
+authors = ["Ben Kimock <kimockb@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+pdfpdf = {git = "https://github.com/saethlin/pdfpdf"}
+ndarray = "0.12"
