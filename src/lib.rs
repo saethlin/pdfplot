@@ -112,41 +112,44 @@ impl Plot {
         let x_tick_interval = self
             .x_tick_interval
             .unwrap_or(compute_tick_interval(max.x - min.x));
-        let x_num_ticks = ((max.x - min.x) / x_tick_interval) as u64 + 1;
 
         let y_tick_interval = self
             .y_tick_interval
             .unwrap_or(compute_tick_interval(max.y - min.y));
-        let y_num_ticks = ((max.y - min.y) / y_tick_interval) as u64 + 1;
 
         let xlim = self.xlim.unwrap_or_else(|| {
             let min_in_ticks = (min.x / x_tick_interval).floor();
             let xmin = min_in_ticks * x_tick_interval;
-            (xmin, max.x)
+            let max_in_ticks = (max.x / x_tick_interval).ceil();
+            let xmax = max_in_ticks * x_tick_interval;
+            (xmin, xmax)
         });
 
         let ylim = self.ylim.unwrap_or_else(|| {
             let min_in_ticks = (min.y / y_tick_interval).floor();
             let ymin = min_in_ticks * y_tick_interval;
-            (ymin, max.y)
+            let max_in_ticks = (max.y / y_tick_interval).ceil();
+            let ymax = max_in_ticks * y_tick_interval;
+            (ymin, ymax)
         });
+
+        let x_num_ticks = ((xlim.1 - xlim.0) / x_tick_interval) as u64 + 1;
+        let y_num_ticks = ((ylim.1 - ylim.0) / y_tick_interval) as u64 + 1;
 
         let x_tick_interval = x_tick_interval * (xlim.1 - xlim.0).signum();
         let y_tick_interval = y_tick_interval * (ylim.1 - ylim.0).signum();
 
         // Y Border size is height of the font, max width of a label, and the tick length
-        let yaxis_margin = 12
+        let yaxis_margin = 12 * 2
             + (0..y_num_ticks)
                 .map(|i| i as f64 * y_tick_interval + ylim.0)
                 .map(|v| self.pdf.width_of(&format!("{}", v)) as u64)
                 .max()
                 .unwrap()
             + self.tick_length as u64;
-        let yaxis_margin = yaxis_margin + yaxis_margin / 4;
 
-        // X border size is height of the label, height of the label, and the tick length
-        let xaxis_margin = 12 + 12 + self.tick_length as u64;
-        let xaxis_margin = xaxis_margin + xaxis_margin / 4;
+        // X border size is 1.5 * height of the axis label label, height of the tick labels, and the tick length
+        let xaxis_margin = (12 * 3 / 2) + 12 + self.tick_length as u64;
 
         let width = self.width;
         let height = self.height;
