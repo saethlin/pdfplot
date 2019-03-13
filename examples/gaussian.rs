@@ -7,7 +7,7 @@ fn main() {
     Plot::new()
         .ylim(-100.0, 600.0)
         .xlim(0.0, 600.0)
-        .plot(&x, &y)
+        .plot(x.as_slice().unwrap(), y.as_slice().unwrap())
         .write_to("plot.pdf")
         .unwrap();
 }

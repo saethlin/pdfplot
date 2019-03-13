@@ -6,4 +6,6 @@ edition = "2018"
 
 [dependencies]
 pdfpdf = {git = "https://github.com/saethlin/pdfpdf"}
+
+[dev-dependencies]
 ndarray = "0.12"

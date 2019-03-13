@@ -9,6 +9,8 @@ pub struct Plot {
     y_tick_interval: Option<f64>,
     xlim: Option<(f64, f64)>,
     ylim: Option<(f64, f64)>,
+    xlabel: Option<String>,
+    ylabel: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -50,6 +52,8 @@ impl Plot {
             y_tick_interval: None,
             xlim: None,
             ylim: None,
+            xlabel: None,
+            ylabel: None,
         }
     }
 
@@ -63,19 +67,22 @@ impl Plot {
         self
     }
 
+    pub fn xlabel(&mut self, text: &str) -> &mut Self {
+        self.xlabel = Some(text.to_string());
+        self
+    }
+
+    pub fn ylabel(&mut self, text: &str) -> &mut Self {
+        self.ylabel = Some(text.to_string());
+        self
+    }
+
     pub fn tick_length(&mut self, length: f64) -> &mut Self {
         self.tick_length = length;
         self
     }
 
-    pub fn plot(
-        &mut self,
-        x_arr: &ndarray::Array1<f64>,
-        y_arr: &ndarray::Array1<f64>,
-    ) -> &mut Self {
-        let x_values = x_arr.as_slice().unwrap();
-        let y_values = y_arr.as_slice().unwrap();
-
+    pub fn plot(&mut self, x_values: &[f64], y_values: &[f64]) -> &mut Self {
         // Pick the axes limits
         let (min, max) = {
             use std::f64;
@@ -101,19 +108,31 @@ impl Plot {
         assert!(min.x.is_finite());
         assert!(min.y.is_finite());
 
-        let xlim = self.xlim.unwrap_or((min.x, max.x));
-        let ylim = self.ylim.unwrap_or((min.y, max.y));
-
         // Compute the tick labels for x and y axes so that we can position the plotting area
         let x_tick_interval = self
             .x_tick_interval
-            .unwrap_or(compute_tick_interval(xlim.1 - xlim.0));
-        let x_num_ticks = ((xlim.1 - xlim.0) / x_tick_interval) as u64 + 1;
+            .unwrap_or(compute_tick_interval(max.x - min.x));
+        let x_num_ticks = ((max.x - min.x) / x_tick_interval) as u64 + 1;
 
         let y_tick_interval = self
             .y_tick_interval
-            .unwrap_or(compute_tick_interval(ylim.1 - ylim.0));
-        let y_num_ticks = ((ylim.1 - ylim.0) / y_tick_interval) as u64 + 1;
+            .unwrap_or(compute_tick_interval(max.y - min.y));
+        let y_num_ticks = ((max.y - min.y) / y_tick_interval) as u64 + 1;
+
+        let xlim = self.xlim.unwrap_or_else(|| {
+            let min_in_ticks = (min.x / x_tick_interval).floor();
+            let xmin = min_in_ticks * x_tick_interval;
+            (xmin, max.x)
+        });
+
+        let ylim = self.ylim.unwrap_or_else(|| {
+            let min_in_ticks = (min.y / y_tick_interval).floor();
+            let ymin = min_in_ticks * y_tick_interval;
+            (ymin, max.y)
+        });
+
+        let x_tick_interval = x_tick_interval * (xlim.1 - xlim.0).signum();
+        let y_tick_interval = y_tick_interval * (ylim.1 - ylim.0).signum();
 
         // Y Border size is height of the font, max width of a label, and the tick length
         let yaxis_margin = 12
@@ -188,7 +207,7 @@ impl Plot {
         let scaled = x_values
             .iter()
             .zip(y_values.iter())
-            .filter(|(&x, &y)| x >= xlim.0 && x <= xlim.1 && y >= ylim.0 && y <= ylim.1)
+            //.filter(|(&x, &y)| x >= xlim.0 && x <= xlim.1 && y >= ylim.0 && y <= ylim.1)
             .map(|(&x, &y)| (to_canvas_x(x), to_canvas_y(y)));
 
         // Draw the data series
@@ -196,22 +215,26 @@ impl Plot {
             .set_line_width(1.5)
             .set_color(Color::rgb(31, 119, 180))
             .draw_line(scaled)
-            // Draw the x label
-            .set_color(Color::gray(0))
-            .draw_text(
+            .set_color(Color::gray(0));
+
+        // Draw the x label
+        if let Some(ref xlabel) = self.xlabel {
+            self.pdf.draw_text(
                 to_canvas_x(xlim.0 + (xlim.1 - xlim.0) / 2.0),
                 2,
                 BottomCenter,
-                "xlabel",
-            )
+                xlabel,
+            );
+        }
+        if let Some(ref ylabel) = self.ylabel {
             // Draw the y label
-            .transform(Matrix::rotate_deg(90))
-            .draw_text(
+            self.pdf.transform(Matrix::rotate_deg(90)).draw_text(
                 to_canvas_y(ylim.0 + (ylim.1 - ylim.0) / 2.0),
                 0,
                 TopCenter,
-                "ylabel",
+                ylabel,
             );
+        }
 
         self
     }
