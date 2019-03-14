@@ -7,6 +7,7 @@ fn main() {
     Plot::new()
         .xlabel("xlabel")
         .ylabel("ylabel")
+        .xlim(600., 0.)
         .plot(x.as_slice().unwrap(), y.as_slice().unwrap())
         .write_to("plot.pdf")
         .unwrap();

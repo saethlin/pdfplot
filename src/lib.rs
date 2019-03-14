@@ -19,7 +19,49 @@ struct Point {
     y: f64,
 }
 
+trait ToU64 {
+    fn to_u64(self) -> u64;
+}
+
+impl ToU64 for f64 {
+    fn to_u64(self) -> u64 {
+        assert!(
+            self >= u64::min_value() as f64,
+            "{} < u64::min_value(), {}",
+            self,
+            u64::min_value()
+        );
+        assert!(
+            self <= u64::max_value() as f64
+            "{} > u64::max_value(), {}",
+            self,
+            u64::max_value()
+        );
+        self as u64
+    }
+}
+
+trait FloatMax {
+    fn float_max(self) -> f64;
+}
+
+impl<T> FloatMax for T
+where
+    T: Iterator<Item = f64>,
+{
+    fn float_max(mut self) -> f64 {
+        let mut max = self.next().unwrap();
+        for item in self {
+            if item > max {
+                max = item;
+            }
+        }
+        max
+    }
+}
+
 fn compute_tick_interval(range: f64) -> f64 {
+    let range = range.abs();
     let order_of_magnitude = (10.0f64).powi(range.log10() as i32);
     let possible_tick_intervals = [
         order_of_magnitude / 2.0,
@@ -133,38 +175,37 @@ impl Plot {
             (ymin, ymax)
         });
 
-        let x_num_ticks = ((xlim.1 - xlim.0) / x_tick_interval) as u64 + 1;
-        let y_num_ticks = ((ylim.1 - ylim.0) / y_tick_interval) as u64 + 1;
+        let x_num_ticks = ((xlim.1 - xlim.0).abs() / x_tick_interval).to_u64() + 1;
+        let y_num_ticks = ((ylim.1 - ylim.0).abs() / y_tick_interval).to_u64() + 1;
 
         let x_tick_interval = x_tick_interval * (xlim.1 - xlim.0).signum();
         let y_tick_interval = y_tick_interval * (ylim.1 - ylim.0).signum();
 
         // Y Border size is height of the font, max width of a label, and the tick length
-        let yaxis_margin = 12 * 2
+        let yaxis_margin = 12. * 2.
             + (0..y_num_ticks)
                 .map(|i| i as f64 * y_tick_interval + ylim.0)
-                .map(|v| self.pdf.width_of(&format!("{}", v)) as u64)
-                .max()
-                .unwrap()
-            + self.tick_length as u64;
+                .map(|v| self.pdf.width_of(&format!("{}", v)))
+                .float_max()
+            + self.tick_length;
 
         // X border size is 1.5 * height of the axis label label, height of the tick labels, and the tick length
-        let xaxis_margin = (12 * 3 / 2) + 12 + self.tick_length as u64;
+        let xaxis_margin = (12. * 1.5) + 12. + self.tick_length;
 
         let width = self.width;
         let height = self.height;
 
         // Function to convert from plot pixels to canvas pixels
         let to_canvas_x = |x| {
-            let plot_width = width - yaxis_margin as f64 - 0.075 * width;
+            let plot_width = width - yaxis_margin - 0.075 * width;
             let x_scale = plot_width / (xlim.1 - xlim.0);
-            ((x - xlim.0) * x_scale) + yaxis_margin as f64
+            ((x - xlim.0) * x_scale) + yaxis_margin
         };
 
         let to_canvas_y = |y| {
-            let plot_height = height - xaxis_margin as f64 - 0.075 * height;
+            let plot_height = height - xaxis_margin - 0.075 * height;
             let y_scale = plot_height / (ylim.1 - ylim.0);
-            ((y - ylim.0) * y_scale) + xaxis_margin as f64
+            ((y - ylim.0) * y_scale) + xaxis_margin
         };
 
         // Draw the plot's border at the margins
