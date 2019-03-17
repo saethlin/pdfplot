@@ -1,3 +1,6 @@
+mod util;
+pub use util::loadtxt;
+
 use pdfpdf::{Alignment::*, Color, Matrix, Pdf};
 
 pub struct Plot {
