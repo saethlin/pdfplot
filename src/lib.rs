@@ -1,7 +1,7 @@
-mod util;
-pub use util::loadtxt;
+pub mod util;
+use util::{FloatMax, ToU64};
 
-use pdfpdf::{Alignment::*, Color, Matrix, Pdf};
+use pdfpdf::{Alignment::*, Color, Matrix, Pdf, Point, Size};
 
 pub struct Plot {
     pdf: Pdf,
@@ -14,59 +14,26 @@ pub struct Plot {
     ylim: Option<(f64, f64)>,
     xlabel: Option<String>,
     ylabel: Option<String>,
+    marker: Option<Marker>,
+    linestyle: Option<LineStyle>,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct Point {
-    x: f64,
-    y: f64,
+#[derive(Clone, Copy, Debug)]
+pub enum Marker {
+    Dot,
 }
 
-trait ToU64 {
-    fn to_u64(self) -> u64;
-}
-
-impl ToU64 for f64 {
-    fn to_u64(self) -> u64 {
-        assert!(
-            self >= u64::min_value() as f64,
-            "{} < u64::min_value(), {}",
-            self,
-            u64::min_value()
-        );
-        assert!(
-            self <= u64::max_value() as f64
-            "{} > u64::max_value(), {}",
-            self,
-            u64::max_value()
-        );
-        self as u64
-    }
-}
-
-trait FloatMax {
-    fn float_max(self) -> f64;
-}
-
-impl<T> FloatMax for T
-where
-    T: Iterator<Item = f64>,
-{
-    fn float_max(mut self) -> f64 {
-        let mut max = self.next().unwrap();
-        for item in self {
-            if item > max {
-                max = item;
-            }
-        }
-        max
-    }
+#[derive(Clone, Copy, Debug)]
+pub enum LineStyle {
+    Solid,
 }
 
 fn compute_tick_interval(range: f64) -> f64 {
     let range = range.abs();
-    let order_of_magnitude = (10.0f64).powi(range.log10() as i32);
+    let order_of_magnitude = (10.0f64).powi(range.log10().round() as i32);
     let possible_tick_intervals = [
+        order_of_magnitude / 10.0,
+        order_of_magnitude / 5.0,
         order_of_magnitude / 2.0,
         order_of_magnitude,
         order_of_magnitude * 2.0,
@@ -89,7 +56,7 @@ fn compute_tick_interval(range: f64) -> f64 {
 impl Plot {
     pub fn new() -> Self {
         Self {
-            pdf: Pdf::new_uncompressed(),
+            pdf: Pdf::new(),
             width: 500.0,
             height: 500.0,
             tick_length: 6.0,
@@ -99,6 +66,8 @@ impl Plot {
             ylim: None,
             xlabel: None,
             ylabel: None,
+            marker: None,
+            linestyle: Some(LineStyle::Solid),
         }
     }
 
@@ -127,7 +96,28 @@ impl Plot {
         self
     }
 
+    pub fn x_tick_interval(&mut self, interval: f64) -> &mut Self {
+        self.x_tick_interval = Some(interval);
+        self
+    }
+
+    pub fn y_tick_interval(&mut self, interval: f64) -> &mut Self {
+        self.y_tick_interval = Some(interval);
+        self
+    }
+
+    pub fn marker(&mut self, marker: Option<Marker>) -> &mut Self {
+        self.marker = marker;
+        self
+    }
+
+    pub fn linestyle(&mut self, style: Option<LineStyle>) -> &mut Self {
+        self.linestyle = style;
+        self
+    }
+
     pub fn plot(&mut self, x_values: &[f64], y_values: &[f64]) -> &mut Self {
+        self.pdf.precision(2);
         // Pick the axes limits
         let (min, max) = {
             use std::f64;
@@ -153,7 +143,8 @@ impl Plot {
         assert!(min.x.is_finite());
         assert!(min.y.is_finite());
 
-        // Compute the tick labels for x and y axes so that we can position the plotting area
+        // Compute the tick interval from maxes first so we can choose limits that are a multiple
+        // of the tick interval
         let x_tick_interval = self
             .x_tick_interval
             .unwrap_or(compute_tick_interval(max.x - min.x));
@@ -178,17 +169,52 @@ impl Plot {
             (ymin, ymax)
         });
 
+        // Compute the tick interval again but this time based on the now-known axes limits
+        // This fixes our selection of tick interval in situations where we were told odd axes
+        // limits
+        let x_tick_interval = self
+            .x_tick_interval
+            .unwrap_or(compute_tick_interval(xlim.1 - xlim.0));
+
+        let y_tick_interval = self
+            .y_tick_interval
+            .unwrap_or(compute_tick_interval(ylim.1 - ylim.0));
+
         let x_num_ticks = ((xlim.1 - xlim.0).abs() / x_tick_interval).to_u64() + 1;
         let y_num_ticks = ((ylim.1 - ylim.0).abs() / y_tick_interval).to_u64() + 1;
 
         let x_tick_interval = x_tick_interval * (xlim.1 - xlim.0).signum();
         let y_tick_interval = y_tick_interval * (ylim.1 - ylim.0).signum();
 
+        let tick_precision = y_tick_interval.abs().log10();
+        let tick_max = ylim.0.abs().max(ylim.1.abs()).log10();
+
+        let y_tick_labels: Vec<String> = (0..y_num_ticks)
+            .map(|i| i as f64 * y_tick_interval + ylim.0)
+            .map(|v| {
+                if v == 0.0 {
+                    format!("{}", v)
+                } else if tick_precision < 0.0 {
+                    // If we have small ticks, format so that the last sig fig is visible
+                    format!("{:.*}", tick_precision.abs().ceil() as usize, v)
+                } else if tick_max < 4. {
+                    // For numbers close to +/- 1, use default formatting
+                    format!("{}", v)
+                } else {
+                    format!(
+                        "{:.*e}",
+                        ((tick_max - tick_precision).abs().ceil() - 1.).max(1.) as usize,
+                        v
+                    )
+                }
+            })
+            .collect();
+
         // Y Border size is height of the font, max width of a label, and the tick length
         let yaxis_margin = 12. * 2.
-            + (0..y_num_ticks)
-                .map(|i| i as f64 * y_tick_interval + ylim.0)
-                .map(|v| self.pdf.width_of(&format!("{}", v)))
+            + y_tick_labels
+                .iter()
+                .map(|label| self.pdf.width_of(&label))
                 .float_max()
             + self.tick_length;
 
@@ -213,62 +239,103 @@ impl Plot {
 
         // Draw the plot's border at the margins
         self.pdf
-            .add_page(self.width, self.height)
+            .add_page(Size {
+                width: self.width,
+                height: self.height,
+            })
             .set_color(Color::gray(0))
             .set_line_width(0.75)
-            .move_to(to_canvas_x(xlim.0), to_canvas_y(ylim.1))
-            .line_to(to_canvas_x(xlim.0), to_canvas_y(ylim.0))
-            .line_to(to_canvas_x(xlim.1), to_canvas_y(ylim.0))
+            .move_to(Point {
+                x: to_canvas_x(xlim.0),
+                y: to_canvas_y(ylim.1),
+            })
+            .line_to(Point {
+                x: to_canvas_x(xlim.0),
+                y: to_canvas_y(ylim.0),
+            })
+            .line_to(Point {
+                x: to_canvas_x(xlim.1),
+                y: to_canvas_y(ylim.0),
+            })
             .end_line();
 
         // Draw the x tick marks
         for i in 0..x_num_ticks {
             let x = i as f64 * x_tick_interval + xlim.0;
             self.pdf
-                .move_to(to_canvas_x(x), to_canvas_y(ylim.0))
-                .line_to(to_canvas_x(x), to_canvas_y(ylim.0) - self.tick_length)
+                .move_to(Point {
+                    x: to_canvas_x(x),
+                    y: to_canvas_y(ylim.0),
+                })
+                .line_to(Point {
+                    x: to_canvas_x(x),
+                    y: to_canvas_y(ylim.0) - self.tick_length,
+                })
                 .end_line();
             self.pdf.draw_text(
-                to_canvas_x(x),
-                to_canvas_y(ylim.0) - self.tick_length,
+                Point {
+                    x: to_canvas_x(x),
+                    y: to_canvas_y(ylim.0) - self.tick_length,
+                },
                 TopCenter,
                 &format!("{}", x),
             );
         }
 
         // Draw the y tick marks
-        for i in 0..y_num_ticks {
+        for (i, label) in (0..y_num_ticks).zip(&y_tick_labels) {
             let y = i as f64 * y_tick_interval + ylim.0;
             self.pdf
-                .move_to(to_canvas_x(xlim.0), to_canvas_y(y))
-                .line_to(to_canvas_x(xlim.0) - self.tick_length, to_canvas_y(y))
+                .move_to(Point {
+                    x: to_canvas_x(xlim.0),
+                    y: to_canvas_y(y),
+                })
+                .line_to(Point {
+                    x: to_canvas_x(xlim.0) - self.tick_length,
+                    y: to_canvas_y(y),
+                })
                 .end_line();
             self.pdf.draw_text(
-                to_canvas_x(xlim.0) - self.tick_length - 2.0,
-                to_canvas_y(y),
+                Point {
+                    x: to_canvas_x(xlim.0) - self.tick_length - 2.0,
+                    y: to_canvas_y(y),
+                },
                 CenterRight,
-                &format!("{}", y),
+                label,
             );
         }
 
-        let scaled = x_values
-            .iter()
-            .zip(y_values.iter())
-            //.filter(|(&x, &y)| x >= xlim.0 && x <= xlim.1 && y >= ylim.0 && y <= ylim.1)
-            .map(|(&x, &y)| (to_canvas_x(x), to_canvas_y(y)));
-
         // Draw the data series
         self.pdf
+            .set_clipping_box(
+                Point {
+                    x: to_canvas_x(xlim.0) - 2.0,
+                    y: to_canvas_y(ylim.0) - 2.0,
+                },
+                Size {
+                    width: to_canvas_x(xlim.1) - to_canvas_x(xlim.0) + 4.0,
+                    height: to_canvas_y(ylim.1) - to_canvas_y(ylim.0) + 4.0,
+                },
+            )
             .set_line_width(1.5)
-            .set_color(Color::rgb(31, 119, 180))
-            .draw_line(scaled)
+            .set_color(Color {
+                red: 31,
+                green: 119,
+                blue: 180,
+            })
+            .draw_line(
+                x_values.iter().map(|&v| to_canvas_x(v)),
+                y_values.iter().map(|&v| to_canvas_y(v)),
+            )
             .set_color(Color::gray(0));
 
         // Draw the x label
         if let Some(ref xlabel) = self.xlabel {
             self.pdf.draw_text(
-                to_canvas_x(xlim.0 + (xlim.1 - xlim.0) / 2.0),
-                2,
+                Point {
+                    x: to_canvas_x(xlim.0 + (xlim.1 - xlim.0) / 2.0),
+                    y: 2,
+                },
                 BottomCenter,
                 xlabel,
             );
@@ -276,8 +343,10 @@ impl Plot {
         if let Some(ref ylabel) = self.ylabel {
             // Draw the y label
             self.pdf.transform(Matrix::rotate_deg(90)).draw_text(
-                to_canvas_y(ylim.0 + (ylim.1 - ylim.0) / 2.0),
-                0,
+                Point {
+                    x: to_canvas_y(ylim.0 + (ylim.1 - ylim.0) / 2.0),
+                    y: 0,
+                },
                 TopCenter,
                 ylabel,
             );
