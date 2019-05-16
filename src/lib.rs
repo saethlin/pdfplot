@@ -116,7 +116,12 @@ impl Plot {
         self
     }
 
-    pub fn plot(&mut self, x_values: &[f64], y_values: &[f64]) -> &mut Self {
+    pub fn plot(
+        &mut self,
+        x_values: &[f64],
+        y_values: &[f64],
+        image: Option<(&[u8], u64, u64)>,
+    ) -> &mut Self {
         self.pdf.precision(2);
         // Pick the axes limits
         let (min, max) = {
@@ -138,20 +143,18 @@ impl Plot {
             (min, max)
         };
 
-        assert!(max.x.is_finite());
-        assert!(max.y.is_finite());
-        assert!(min.x.is_finite());
-        assert!(min.y.is_finite());
+        assert!((min.x.is_finite() && max.x.is_finite()) || self.xlim.is_some());
+        assert!((min.y.is_finite() && max.y.is_finite()) || self.ylim.is_some());
 
         // Compute the tick interval from maxes first so we can choose limits that are a multiple
         // of the tick interval
         let x_tick_interval = self
             .x_tick_interval
-            .unwrap_or(compute_tick_interval(max.x - min.x));
+            .unwrap_or_else(|| compute_tick_interval(max.x - min.x));
 
         let y_tick_interval = self
             .y_tick_interval
-            .unwrap_or(compute_tick_interval(max.y - min.y));
+            .unwrap_or_else(|| compute_tick_interval(max.y - min.y));
 
         let xlim = self.xlim.unwrap_or_else(|| {
             let min_in_ticks = (min.x / x_tick_interval).floor();
@@ -174,11 +177,11 @@ impl Plot {
         // limits
         let x_tick_interval = self
             .x_tick_interval
-            .unwrap_or(compute_tick_interval(xlim.1 - xlim.0));
+            .unwrap_or_else(|| compute_tick_interval(xlim.1 - xlim.0));
 
         let y_tick_interval = self
             .y_tick_interval
-            .unwrap_or(compute_tick_interval(ylim.1 - ylim.0));
+            .unwrap_or_else(|| compute_tick_interval(ylim.1 - ylim.0));
 
         let x_num_ticks = ((xlim.1 - xlim.0).abs() / x_tick_interval).to_u64() + 1;
         let y_num_ticks = ((ylim.1 - ylim.0).abs() / y_tick_interval).to_u64() + 1;
@@ -306,6 +309,7 @@ impl Plot {
         }
 
         // Draw the data series
+        /*
         self.pdf
             .set_clipping_box(
                 Point {
@@ -328,6 +332,7 @@ impl Plot {
                 y_values.iter().map(|&v| to_canvas_y(v)),
             )
             .set_color(Color::gray(0));
+        */
 
         // Draw the x label
         if let Some(ref xlabel) = self.xlabel {
@@ -349,6 +354,24 @@ impl Plot {
                 },
                 TopCenter,
                 ylabel,
+            );
+        }
+
+        self.pdf.transform(Matrix::rotate_deg(-90));
+
+        if let Some((image_data, image_width, image_height)) = image {
+            let x_extent = to_canvas_x(xlim.1) - to_canvas_x(xlim.0);
+            let y_extent = to_canvas_y(ylim.1) - to_canvas_y(ylim.0);
+            println!("{} {}", x_extent, y_extent);
+            self.pdf.transform(
+                Matrix::scale(
+                    x_extent / (image_width as f64),
+                    y_extent / (image_width as f64),
+                ) * Matrix::translate(to_canvas_x(xlim.0), to_canvas_y(ylim.0)),
+            );
+            self.pdf.add_image_at(
+                pdfpdf::Image::new(image_data, image_width, image_height),
+                pdfpdf::Point { x: 0, y: 0 },
             );
         }
 
