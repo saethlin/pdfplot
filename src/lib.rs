@@ -189,6 +189,30 @@ impl Plot {
         let x_tick_interval = x_tick_interval * (xlim.1 - xlim.0).signum();
         let y_tick_interval = y_tick_interval * (ylim.1 - ylim.0).signum();
 
+        let tick_precision = x_tick_interval.abs().log10();
+        let tick_max = xlim.0.abs().max(xlim.1.abs()).log10();
+
+        let x_tick_labels: Vec<String> = (0..x_num_ticks)
+            .map(|i| i as f64 * x_tick_interval + xlim.0)
+            .map(|v| {
+                if v == 0.0 {
+                    format!("{}", v)
+                } else if tick_precision < 0.0 {
+                    // If we have small ticks, format so that the last sig fig is visible
+                    format!("{:.*}", tick_precision.abs().ceil() as usize, v)
+                } else if tick_max < 4. {
+                    // For numbers close to +/- 1, use default formatting
+                    format!("{}", v)
+                } else {
+                    format!(
+                        "{:.*e}",
+                        ((tick_max - tick_precision).abs().ceil() - 1.).max(1.) as usize,
+                        v
+                    )
+                }
+            })
+            .collect();
+
         let tick_precision = y_tick_interval.abs().log10();
         let tick_max = ylim.0.abs().max(ylim.1.abs()).log10();
 
@@ -198,15 +222,12 @@ impl Plot {
                 if v == 0.0 {
                     format!("{}", v)
                 } else if tick_precision < 0.0 {
-                    println!("small tick mode");
                     // If we have small ticks, format so that the last sig fig is visible
                     format!("{:.*}", tick_precision.abs().ceil() as usize, v)
                 } else if tick_max < 4. {
-                    println!("default formatting");
                     // For numbers close to +/- 1, use default formatting
                     format!("{}", v)
                 } else {
-                    println!("generalized scientific formatting");
                     format!(
                         "{:.*e}",
                         ((tick_max - tick_precision).abs().ceil() - 1.).max(1.) as usize,
@@ -266,7 +287,7 @@ impl Plot {
             .end_line();
 
         // Draw the x tick marks
-        for i in 0..x_num_ticks {
+        for (i, label) in (0..x_num_ticks).zip(&x_tick_labels) {
             let x = i as f64 * x_tick_interval + xlim.0;
             self.pdf
                 .move_to(Point {
@@ -284,7 +305,7 @@ impl Plot {
                     y: to_canvas_y(ylim.0) - self.tick_length,
                 },
                 TopCenter,
-                &format!("{}", x),
+                label,
             );
         }
 
@@ -312,30 +333,30 @@ impl Plot {
         }
 
         // Draw the data series
-        /*
-        self.pdf
-            .set_clipping_box(
-                Point {
-                    x: to_canvas_x(xlim.0) - 2.0,
-                    y: to_canvas_y(ylim.0) - 2.0,
-                },
-                Size {
-                    width: to_canvas_x(xlim.1) - to_canvas_x(xlim.0) + 4.0,
-                    height: to_canvas_y(ylim.1) - to_canvas_y(ylim.0) + 4.0,
-                },
-            )
-            .set_line_width(1.5)
-            .set_color(Color {
-                red: 31,
-                green: 119,
-                blue: 180,
-            })
-            .draw_line(
-                x_values.iter().map(|&v| to_canvas_x(v)),
-                y_values.iter().map(|&v| to_canvas_y(v)),
-            )
-            .set_color(Color::gray(0));
-        */
+        if !x_values.is_empty() {
+            self.pdf
+                .set_clipping_box(
+                    Point {
+                        x: to_canvas_x(xlim.0) - 2.0,
+                        y: to_canvas_y(ylim.0) - 2.0,
+                    },
+                    Size {
+                        width: to_canvas_x(xlim.1) - to_canvas_x(xlim.0) + 4.0,
+                        height: to_canvas_y(ylim.1) - to_canvas_y(ylim.0) + 4.0,
+                    },
+                )
+                .set_line_width(1.5)
+                .set_color(Color {
+                    red: 31,
+                    green: 119,
+                    blue: 180,
+                })
+                .draw_line(
+                    x_values.iter().map(|&v| to_canvas_x(v)),
+                    y_values.iter().map(|&v| to_canvas_y(v)),
+                )
+                .set_color(Color::gray(0));
+        }
 
         // Draw the x label
         if let Some(ref xlabel) = self.xlabel {
@@ -358,14 +379,12 @@ impl Plot {
                 TopCenter,
                 ylabel,
             );
+            self.pdf.transform(Matrix::rotate_deg(-90));
         }
-
-        self.pdf.transform(Matrix::rotate_deg(-90));
 
         if let Some((image_data, image_width, image_height)) = image {
             let x_extent = to_canvas_x(xlim.1) - to_canvas_x(xlim.0);
             let y_extent = to_canvas_y(ylim.1) - to_canvas_y(ylim.0);
-            println!("{} {}", x_extent, y_extent);
             self.pdf.transform(
                 Matrix::scale(
                     x_extent / (image_width as f64),
