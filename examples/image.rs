@@ -1,7 +1,11 @@
 use pdfplot::Plot;
 
 fn main() {
-    let data = vec![0; 100 * 100 * 3];
+    let mut data = vec![0; 100 * 100 * 3];
+    data[15150] = 255;
+    data[15151] = 255;
+    data[15152] = 255;
+
     Plot::new()
         .xlabel("xlabel")
         .ylabel("ylabel")

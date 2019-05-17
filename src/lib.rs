@@ -198,12 +198,15 @@ impl Plot {
                 if v == 0.0 {
                     format!("{}", v)
                 } else if tick_precision < 0.0 {
+                    println!("small tick mode");
                     // If we have small ticks, format so that the last sig fig is visible
                     format!("{:.*}", tick_precision.abs().ceil() as usize, v)
                 } else if tick_max < 4. {
+                    println!("default formatting");
                     // For numbers close to +/- 1, use default formatting
                     format!("{}", v)
                 } else {
+                    println!("generalized scientific formatting");
                     format!(
                         "{:.*e}",
                         ((tick_max - tick_precision).abs().ceil() - 1.).max(1.) as usize,
