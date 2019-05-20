@@ -2,6 +2,8 @@ mod util;
 pub use util::loadtxt;
 use util::{FloatMax, ToU64};
 
+mod colormaps;
+
 use pdfpdf::{Alignment::*, Color, Matrix, Pdf, Point, Size};
 
 pub struct Plot {
@@ -44,6 +46,8 @@ fn compute_tick_interval(range: f64) -> f64 {
         (range / possible_tick_intervals[0]).round() as i64,
         (range / possible_tick_intervals[1]).round() as i64,
         (range / possible_tick_intervals[2]).round() as i64,
+        (range / possible_tick_intervals[3]).round() as i64,
+        (range / possible_tick_intervals[4]).round() as i64,
     ];
     // Try to get as close to 5 ticks as possible
     let chosen_index = num_ticks
@@ -94,7 +98,7 @@ impl Axis {
 impl Plot {
     pub fn new() -> Self {
         let mut pdf = Pdf::new();
-        pdf.font(pdfpdf::Font::Helvetica, 12.0).precision(10);
+        pdf.font(pdfpdf::Font::Helvetica, 12.0).precision(4);
         Self {
             pdf,
             font_size: 12.0,
@@ -412,10 +416,34 @@ impl Plot {
 
     pub fn image(
         &mut self,
-        image_data: &[u8],
+        image_data: &[f64],
         image_width: usize,
         image_height: usize,
     ) -> &mut Self {
+        // Convert the image to u8 and apply a color map
+        assert!(image_width * image_height == image_data.len());
+
+        let mut png_bytes = Vec::with_capacity(image_data.len() * 3);
+        let mut max = std::f64::MIN;
+        let mut min = std::f64::MAX;
+        for i in image_data {
+            if *i < min {
+                min = *i;
+            }
+            if *i > max {
+                max = *i;
+            }
+        }
+
+        let map = colormaps::VIRIDIS;
+        for i in image_data {
+            let i = i.max(min); // upper-end clipping is applied by the line below
+            let index = ((i - min) / (max - min) * 255.0) as usize;
+            png_bytes.push((map[index][0] * 255.0) as u8);
+            png_bytes.push((map[index][1] * 255.0) as u8);
+            png_bytes.push((map[index][2] * 255.0) as u8);
+        }
+
         let (xaxis, yaxis) = self.digest_tick_settings(&[], &[]);
 
         let width = self.width;
@@ -457,7 +485,7 @@ impl Plot {
             ),
         );
         self.pdf.add_image_at(
-            pdfpdf::Image::new(image_data, image_width as u64, image_height as u64),
+            pdfpdf::Image::new(&png_bytes, image_width as u64, image_height as u64),
             pdfpdf::Point { x: 0, y: 0 },
         );
         self

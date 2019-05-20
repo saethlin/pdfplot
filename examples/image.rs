@@ -1,13 +1,8 @@
 use pdfplot::Plot;
 
 fn main() {
-    let mut data = vec![0; 100 * 100 * 3];
-    for i in &mut data {
-        *i += 150;
-    }
-    data[15150] = 255;
-    data[15151] = 255;
-    data[15152] = 255;
+    let mut data = vec![0.0; 100 * 100];
+    data[5050] = 1.0;
 
     Plot::new()
         .xlabel("escape fraction")
