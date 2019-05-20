@@ -498,7 +498,7 @@ impl Plot {
         self
     }
 
-    pub fn write_to(&mut self, filename: &str) -> std::io::Result<()> {
+    pub fn write_to<F>(&mut self, filename: F) -> std::io::Result<()> where F: AsRef<std::path::Path> {
         self.pdf.write_to(filename)
     }
 }
