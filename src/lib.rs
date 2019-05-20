@@ -426,7 +426,10 @@ impl Plot {
         let mut png_bytes = Vec::with_capacity(image_data.len() * 3);
         let mut max = std::f64::MIN;
         let mut min = std::f64::MAX;
-        for i in image_data {
+        for i in image_data
+            .iter()
+            .filter(|i| !i.is_nan() && !i.is_infinite())
+        {
             if *i < min {
                 min = *i;
             }
@@ -437,11 +440,15 @@ impl Plot {
 
         let map = colormaps::VIRIDIS;
         for i in image_data {
-            let i = i.max(min); // upper-end clipping is applied by the line below
-            let index = ((i - min) / (max - min) * 255.0) as usize;
-            png_bytes.push((map[index][0] * 255.0) as u8);
-            png_bytes.push((map[index][1] * 255.0) as u8);
-            png_bytes.push((map[index][2] * 255.0) as u8);
+            if i.is_nan() || i.is_infinite() {
+                png_bytes.extend(&[255, 255, 255]);
+            } else {
+                let i = i.max(min); // upper-end clipping is applied by the line below
+                let index = ((i - min) / (max - min) * 255.0) as usize;
+                png_bytes.push((map[index][0] * 255.0) as u8);
+                png_bytes.push((map[index][1] * 255.0) as u8);
+                png_bytes.push((map[index][2] * 255.0) as u8);
+            }
         }
 
         let (xaxis, yaxis) = self.digest_tick_settings(&[], &[]);
