@@ -1,4 +1,5 @@
-pub mod util;
+mod util;
+pub use util::loadtxt;
 use util::{FloatMax, ToU64};
 
 use pdfpdf::{Alignment::*, Color, Matrix, Pdf, Point, Size};
@@ -7,6 +8,7 @@ pub struct Plot {
     pdf: Pdf,
     width: f64,
     height: f64,
+    font_size: f64,
     tick_length: f64,
     x_tick_interval: Option<f64>,
     y_tick_interval: Option<f64>,
@@ -53,10 +55,49 @@ fn compute_tick_interval(range: f64) -> f64 {
     possible_tick_intervals[chosen_index]
 }
 
+struct Axis {
+    limits: (f64, f64),
+    tick_interval: f64,
+    num_ticks: u64,
+    tick_labels: Vec<String>,
+    margin: f64,
+}
+
+impl Axis {
+    fn tick_labels(&mut self) {
+        let tick_precision = self.tick_interval.abs().log10();
+        let tick_max = self.limits.0.abs().max(self.limits.1.abs()).log10();
+
+        self.tick_labels = (0..self.num_ticks)
+            .map(|i| i as f64 * self.tick_interval + self.limits.0)
+            .map(|v| {
+                if v == 0.0 {
+                    format!("{}", v)
+                } else if tick_precision < 0.0 {
+                    // If we have small ticks, format so that the last sig fig is visible
+                    format!("{:.*}", tick_precision.abs().ceil() as usize, v)
+                } else if tick_max < 4. {
+                    // For numbers close to +/- 1, use default formatting
+                    format!("{}", v)
+                } else {
+                    format!(
+                        "{:.*e}",
+                        ((tick_max - tick_precision).abs().ceil() - 1.).max(1.) as usize,
+                        v
+                    )
+                }
+            })
+            .collect();
+    }
+}
+
 impl Plot {
     pub fn new() -> Self {
+        let mut pdf = Pdf::new();
+        pdf.font(pdfpdf::Font::Helvetica, 12.0).precision(10);
         Self {
-            pdf: Pdf::new(),
+            pdf,
+            font_size: 12.0,
             width: 500.0,
             height: 500.0,
             tick_length: 6.0,
@@ -116,13 +157,7 @@ impl Plot {
         self
     }
 
-    pub fn plot(
-        &mut self,
-        x_values: &[f64],
-        y_values: &[f64],
-        image: Option<(&[u8], u64, u64)>,
-    ) -> &mut Self {
-        self.pdf.precision(2);
+    fn digest_tick_settings(&self, x_values: &[f64], y_values: &[f64]) -> (Axis, Axis) {
         // Pick the axes limits
         let (min, max) = {
             use std::f64;
@@ -143,6 +178,7 @@ impl Plot {
             (min, max)
         };
 
+        // Must either provide data or configure
         assert!((min.x.is_finite() && max.x.is_finite()) || self.xlim.is_some());
         assert!((min.y.is_finite() && max.y.is_finite()) || self.ylim.is_some());
 
@@ -186,84 +222,51 @@ impl Plot {
         let x_num_ticks = ((xlim.1 - xlim.0).abs() / x_tick_interval).to_u64() + 1;
         let y_num_ticks = ((ylim.1 - ylim.0).abs() / y_tick_interval).to_u64() + 1;
 
+        // Quantize the tick interval so that it fits nicely
         let x_tick_interval = x_tick_interval * (xlim.1 - xlim.0).signum();
         let y_tick_interval = y_tick_interval * (ylim.1 - ylim.0).signum();
 
-        let tick_precision = x_tick_interval.abs().log10();
-        let tick_max = xlim.0.abs().max(xlim.1.abs()).log10();
+        let mut xaxis = Axis {
+            limits: xlim,
+            num_ticks: x_num_ticks,
+            tick_interval: x_tick_interval,
+            margin: 0.0,
+            tick_labels: Vec::new(),
+        };
+        xaxis.tick_labels();
 
-        let x_tick_labels: Vec<String> = (0..x_num_ticks)
-            .map(|i| i as f64 * x_tick_interval + xlim.0)
-            .map(|v| {
-                if v == 0.0 {
-                    format!("{}", v)
-                } else if tick_precision < 0.0 {
-                    // If we have small ticks, format so that the last sig fig is visible
-                    format!("{:.*}", tick_precision.abs().ceil() as usize, v)
-                } else if tick_max < 4. {
-                    // For numbers close to +/- 1, use default formatting
-                    format!("{}", v)
-                } else {
-                    format!(
-                        "{:.*e}",
-                        ((tick_max - tick_precision).abs().ceil() - 1.).max(1.) as usize,
-                        v
-                    )
-                }
-            })
-            .collect();
+        // X border size is 1.5 * height of the axis label label, height of the tick labels, and the tick length
+        xaxis.margin = (self.font_size * 1.5) + self.font_size + self.tick_length + self.font_size;
 
-        let tick_precision = y_tick_interval.abs().log10();
-        let tick_max = ylim.0.abs().max(ylim.1.abs()).log10();
-
-        let y_tick_labels: Vec<String> = (0..y_num_ticks)
-            .map(|i| i as f64 * y_tick_interval + ylim.0)
-            .map(|v| {
-                if v == 0.0 {
-                    format!("{}", v)
-                } else if tick_precision < 0.0 {
-                    // If we have small ticks, format so that the last sig fig is visible
-                    format!("{:.*}", tick_precision.abs().ceil() as usize, v)
-                } else if tick_max < 4. {
-                    // For numbers close to +/- 1, use default formatting
-                    format!("{}", v)
-                } else {
-                    format!(
-                        "{:.*e}",
-                        ((tick_max - tick_precision).abs().ceil() - 1.).max(1.) as usize,
-                        v
-                    )
-                }
-            })
-            .collect();
+        let mut yaxis = Axis {
+            limits: ylim,
+            num_ticks: y_num_ticks,
+            tick_interval: y_tick_interval,
+            margin: 0.0,
+            tick_labels: Vec::new(),
+        };
+        yaxis.tick_labels();
 
         // Y Border size is height of the font, max width of a label, and the tick length
-        let yaxis_margin = 12. * 2.
-            + y_tick_labels
+        yaxis.margin = self.font_size * 2.
+            + yaxis
+                .tick_labels
                 .iter()
                 .map(|label| self.pdf.width_of(&label))
                 .float_max()
-            + self.tick_length;
+            + self.tick_length
+            + self.font_size;
 
-        // X border size is 1.5 * height of the axis label label, height of the tick labels, and the tick length
-        let xaxis_margin = (12. * 1.5) + 12. + self.tick_length;
+        (xaxis, yaxis)
+    }
 
-        let width = self.width;
-        let height = self.height;
-
-        // Function to convert from plot pixels to canvas pixels
-        let to_canvas_x = |x| {
-            let plot_width = width - yaxis_margin - 0.075 * width;
-            let x_scale = plot_width / (xlim.1 - xlim.0);
-            ((x - xlim.0) * x_scale) + yaxis_margin
-        };
-
-        let to_canvas_y = |y| {
-            let plot_height = height - xaxis_margin - 0.075 * height;
-            let y_scale = plot_height / (ylim.1 - ylim.0);
-            ((y - ylim.0) * y_scale) + xaxis_margin
-        };
-
+    fn draw_axes(
+        &mut self,
+        xaxis: &Axis,
+        yaxis: &Axis,
+        to_canvas_x: impl Fn(f64) -> f64,
+        to_canvas_y: impl Fn(f64) -> f64,
+    ) {
         // Draw the plot's border at the margins
         self.pdf
             .add_page(Size {
@@ -271,38 +274,35 @@ impl Plot {
                 height: self.height,
             })
             .set_color(Color::gray(0))
-            .set_line_width(0.75)
-            .move_to(Point {
-                x: to_canvas_x(xlim.0),
-                y: to_canvas_y(ylim.1),
-            })
-            .line_to(Point {
-                x: to_canvas_x(xlim.0),
-                y: to_canvas_y(ylim.0),
-            })
-            .line_to(Point {
-                x: to_canvas_x(xlim.1),
-                y: to_canvas_y(ylim.0),
-            })
-            .end_line();
+            .set_line_width(1.0)
+            .draw_rectangle(
+                Point {
+                    x: to_canvas_x(xaxis.limits.0),
+                    y: to_canvas_y(yaxis.limits.0),
+                },
+                Size {
+                    width: to_canvas_x(xaxis.limits.1) - to_canvas_x(xaxis.limits.0),
+                    height: to_canvas_y(yaxis.limits.1) - to_canvas_y(yaxis.limits.0),
+                },
+            );
 
         // Draw the x tick marks
-        for (i, label) in (0..x_num_ticks).zip(&x_tick_labels) {
-            let x = i as f64 * x_tick_interval + xlim.0;
+        for (i, label) in (0..xaxis.num_ticks).zip(&xaxis.tick_labels) {
+            let x = i as f64 * xaxis.tick_interval + xaxis.limits.0;
             self.pdf
                 .move_to(Point {
                     x: to_canvas_x(x),
-                    y: to_canvas_y(ylim.0),
+                    y: to_canvas_y(yaxis.limits.0),
                 })
                 .line_to(Point {
                     x: to_canvas_x(x),
-                    y: to_canvas_y(ylim.0) - self.tick_length,
+                    y: to_canvas_y(yaxis.limits.0) - self.tick_length,
                 })
                 .end_line();
             self.pdf.draw_text(
                 Point {
                     x: to_canvas_x(x),
-                    y: to_canvas_y(ylim.0) - self.tick_length,
+                    y: to_canvas_y(yaxis.limits.0) - self.tick_length,
                 },
                 TopCenter,
                 label,
@@ -310,21 +310,21 @@ impl Plot {
         }
 
         // Draw the y tick marks
-        for (i, label) in (0..y_num_ticks).zip(&y_tick_labels) {
-            let y = i as f64 * y_tick_interval + ylim.0;
+        for (i, label) in (0..yaxis.num_ticks).zip(&yaxis.tick_labels) {
+            let y = i as f64 * yaxis.tick_interval + yaxis.limits.0;
             self.pdf
                 .move_to(Point {
-                    x: to_canvas_x(xlim.0),
+                    x: to_canvas_x(xaxis.limits.0),
                     y: to_canvas_y(y),
                 })
                 .line_to(Point {
-                    x: to_canvas_x(xlim.0) - self.tick_length,
+                    x: to_canvas_x(xaxis.limits.0) - self.tick_length,
                     y: to_canvas_y(y),
                 })
                 .end_line();
             self.pdf.draw_text(
                 Point {
-                    x: to_canvas_x(xlim.0) - self.tick_length - 2.0,
+                    x: to_canvas_x(xaxis.limits.0) - self.tick_length - 2.0,
                     y: to_canvas_y(y),
                 },
                 CenterRight,
@@ -332,17 +332,66 @@ impl Plot {
             );
         }
 
+        // Draw the x label
+        if let Some(ref xlabel) = self.xlabel {
+            self.pdf.draw_text(
+                Point {
+                    x: to_canvas_x(xaxis.limits.0 + (xaxis.limits.1 - xaxis.limits.0) / 2.0),
+                    y: 4.0 + self.font_size / 2.0,
+                },
+                BottomCenter,
+                xlabel,
+            );
+        }
+
+        // Draw the y label
+        if let Some(ref ylabel) = self.ylabel {
+            self.pdf.transform(Matrix::rotate_deg(90)).draw_text(
+                Point {
+                    x: to_canvas_y(yaxis.limits.0 + (yaxis.limits.1 - yaxis.limits.0) / 2.0),
+                    y: -6.0,
+                },
+                TopCenter,
+                ylabel,
+            );
+            self.pdf.transform(Matrix::rotate_deg(-90));
+        }
+    }
+
+    pub fn plot(&mut self, x_values: &[f64], y_values: &[f64]) -> &mut Self {
+        let (xaxis, yaxis) = self.digest_tick_settings(x_values, y_values);
+
+        let width = self.width;
+        let height = self.height;
+
+        let plot_width =
+            width - yaxis.margin - self.pdf.width_of(xaxis.tick_labels.last().unwrap());
+        let plot_height = height - xaxis.margin - self.font_size;
+
+        // Function to convert from plot pixels to canvas pixels
+        let to_canvas_x = |x| {
+            let x_scale = plot_width / (xaxis.limits.1 - xaxis.limits.0);
+            ((x - xaxis.limits.0) * x_scale) + yaxis.margin
+        };
+
+        let to_canvas_y = |y| {
+            let y_scale = plot_height / (yaxis.limits.1 - yaxis.limits.0);
+            ((y - yaxis.limits.0) * y_scale) + xaxis.margin
+        };
+
+        self.draw_axes(&xaxis, &yaxis, to_canvas_x, to_canvas_y);
+
         // Draw the data series
         if !x_values.is_empty() {
             self.pdf
                 .set_clipping_box(
                     Point {
-                        x: to_canvas_x(xlim.0) - 2.0,
-                        y: to_canvas_y(ylim.0) - 2.0,
+                        x: to_canvas_x(xaxis.limits.0) - 2.0,
+                        y: to_canvas_y(yaxis.limits.0) - 2.0,
                     },
                     Size {
-                        width: to_canvas_x(xlim.1) - to_canvas_x(xlim.0) + 4.0,
-                        height: to_canvas_y(ylim.1) - to_canvas_y(ylim.0) + 4.0,
+                        width: to_canvas_x(xaxis.limits.1) - to_canvas_x(xaxis.limits.0) + 4.0,
+                        height: to_canvas_y(yaxis.limits.1) - to_canvas_y(yaxis.limits.0) + 4.0,
                     },
                 )
                 .set_line_width(1.5)
@@ -358,45 +407,59 @@ impl Plot {
                 .set_color(Color::gray(0));
         }
 
-        // Draw the x label
-        if let Some(ref xlabel) = self.xlabel {
-            self.pdf.draw_text(
-                Point {
-                    x: to_canvas_x(xlim.0 + (xlim.1 - xlim.0) / 2.0),
-                    y: 2,
-                },
-                BottomCenter,
-                xlabel,
-            );
-        }
-        if let Some(ref ylabel) = self.ylabel {
-            // Draw the y label
-            self.pdf.transform(Matrix::rotate_deg(90)).draw_text(
-                Point {
-                    x: to_canvas_y(ylim.0 + (ylim.1 - ylim.0) / 2.0),
-                    y: 0,
-                },
-                TopCenter,
-                ylabel,
-            );
-            self.pdf.transform(Matrix::rotate_deg(-90));
-        }
+        self
+    }
 
-        if let Some((image_data, image_width, image_height)) = image {
-            let x_extent = to_canvas_x(xlim.1) - to_canvas_x(xlim.0);
-            let y_extent = to_canvas_y(ylim.1) - to_canvas_y(ylim.0);
-            self.pdf.transform(
-                Matrix::scale(
-                    x_extent / (image_width as f64),
-                    y_extent / (image_width as f64),
-                ) * Matrix::translate(to_canvas_x(xlim.0), to_canvas_y(ylim.0)),
-            );
-            self.pdf.add_image_at(
-                pdfpdf::Image::new(image_data, image_width, image_height),
-                pdfpdf::Point { x: 0, y: 0 },
-            );
-        }
+    pub fn image(
+        &mut self,
+        image_data: &[u8],
+        image_width: usize,
+        image_height: usize,
+    ) -> &mut Self {
+        let (xaxis, yaxis) = self.digest_tick_settings(&[], &[]);
 
+        let width = self.width;
+        let height = self.height;
+
+        let plot_width =
+            width - yaxis.margin - self.pdf.width_of(xaxis.tick_labels.last().unwrap());
+        let plot_height = height - xaxis.margin - self.font_size;
+        let plot_size = plot_width.min(plot_height);
+
+        // This is a hack; we adjust the height and width so that the generated PDF file has its
+        // dimensions adjusted
+        // TODO: This change should be ephemeral
+        self.height = plot_size + xaxis.margin + self.font_size;
+        self.width = plot_size + yaxis.margin + self.font_size;
+
+        // Function to convert from plot pixels to canvas pixels
+        let to_canvas_x = |x| {
+            let x_scale = plot_size / (xaxis.limits.1 - xaxis.limits.0);
+            ((x - xaxis.limits.0) * x_scale) + yaxis.margin
+        };
+
+        let to_canvas_y = |y| {
+            let y_scale = plot_size / (yaxis.limits.1 - yaxis.limits.0);
+            ((y - yaxis.limits.0) * y_scale) + xaxis.margin
+        };
+
+        self.draw_axes(&xaxis, &yaxis, to_canvas_x, to_canvas_y);
+
+        let x_extent = to_canvas_x(xaxis.limits.1) - to_canvas_x(xaxis.limits.0) - 1.0;
+        let y_extent = to_canvas_y(yaxis.limits.1) - to_canvas_y(yaxis.limits.0) - 1.0;
+        self.pdf.transform(
+            Matrix::scale(
+                x_extent / (image_width as f64),
+                y_extent / (image_width as f64),
+            ) * Matrix::translate(
+                to_canvas_x(xaxis.limits.0) + 0.5,
+                to_canvas_y(yaxis.limits.0) + 0.5,
+            ),
+        );
+        self.pdf.add_image_at(
+            pdfpdf::Image::new(image_data, image_width as u64, image_height as u64),
+            pdfpdf::Point { x: 0, y: 0 },
+        );
         self
     }
 
