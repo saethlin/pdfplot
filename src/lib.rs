@@ -82,7 +82,7 @@ impl Axis {
                     format!("{:.*}", tick_precision.abs().ceil() as usize, v)
                 } else if tick_max < 4. {
                     // For numbers close to +/- 1, use default formatting
-                    format!("{}", v)
+                    format!("{:.2}", v)
                 } else {
                     format!(
                         "{:.*e}",
