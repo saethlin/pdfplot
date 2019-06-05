@@ -101,10 +101,10 @@ impl Plot {
         pdf.font(pdfpdf::Font::Helvetica, 12.0).precision(4);
         Self {
             pdf,
-            font_size: 12.0,
+            font_size: 20.0,
             width: 810.0,
             height: 630.0,
-            tick_length: 6.0,
+            tick_length: 10.0,
             x_tick_interval: None,
             y_tick_interval: None,
             xlim: None,
@@ -498,7 +498,10 @@ impl Plot {
         self
     }
 
-    pub fn write_to<F>(&mut self, filename: F) -> std::io::Result<()> where F: AsRef<std::path::Path> {
+    pub fn write_to<F>(&mut self, filename: F) -> std::io::Result<()>
+    where
+        F: AsRef<std::path::Path>,
+    {
         self.pdf.write_to(filename)
     }
 }
