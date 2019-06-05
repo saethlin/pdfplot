@@ -98,13 +98,13 @@ impl Axis {
 impl Plot {
     pub fn new() -> Self {
         let mut pdf = Pdf::new();
-        pdf.font(pdfpdf::Font::Helvetica, 12.0).precision(4);
+        pdf.font(pdfpdf::Font::Helvetica, 20.0).precision(4);
         Self {
             pdf,
             font_size: 20.0,
             width: 810.0,
             height: 630.0,
-            tick_length: 10.0,
+            tick_length: 6.0,
             x_tick_interval: None,
             y_tick_interval: None,
             xlim: None,
