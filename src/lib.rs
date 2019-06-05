@@ -102,8 +102,8 @@ impl Plot {
         Self {
             pdf,
             font_size: 12.0,
-            width: 500.0,
-            height: 500.0,
+            width: 810.0,
+            height: 630.0,
             tick_length: 6.0,
             x_tick_interval: None,
             y_tick_interval: None,
